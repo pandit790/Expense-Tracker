@@ -3,140 +3,105 @@
 <head>
   <meta charset="UTF-8">
   <title>Dashboard</title>
-
-  <!-- ✅ Favicon -->
-  <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
-
-  <!-- ✅ Bootstrap & Chart.js -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-light">
 
-<!-- ✅ Navbar with Logo -->
+<!-- Navbar -->
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
   <div class="container-fluid">
-    <a class="navbar-brand d-flex align-items-center" href="#">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" width="30" height="30" class="me-2">
-      <span>Smart Expense Tracker</span>
-    </a>
+    <span class="navbar-brand">💰 Smart Expense Tracker</span>
     <a href="/logout" class="btn btn-outline-light">Logout</a>
   </div>
 </nav>
 
-<!-- ✅ Main Content -->
-<div class="container mt-4">
-
-  <!-- Total Card -->
-  <div class="row mb-4">
-    <div class="col-md-4">
-      <div class="card text-white bg-success shadow">
-        <div class="card-body">
-          <h5 class="card-title">Total Expenses</h5>
-          <p class="card-text fs-4">₹ {{ total }}</p>
+<!-- Alerts -->
+<div class="container mt-3">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
-      </div>
-    </div>
-  </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+</div>
 
-  <!-- Chart -->
-  <div class="mb-4 bg-white p-3 shadow rounded">
-    <h5 class="mb-3">Category-wise Expense Chart</h5>
-    <canvas id="expenseChart" height="150"></canvas>
-  </div>
-
-  <!-- Add Expense -->
-  <div class="mb-4 bg-white p-3 shadow rounded">
-    <h5 class="mb-3">Add New Expense</h5>
-    <form method="POST" class="row g-3">
-      <div class="col-md-4">
-        <input type="text" class="form-control" name="title" placeholder="Expense Title" required>
+<!-- Add Expense Form -->
+<div class="container mt-4">
+  <h4 class="mb-3">Add Expense</h4>
+  <form method="POST">
+    <div class="row">
+      <div class="col-md-3 mb-3">
+        <input type="text" name="title" class="form-control" placeholder="Title" required>
       </div>
-      <div class="col-md-2">
-        <input type="number" class="form-control" name="amount" placeholder="Amount ₹" required>
+      <div class="col-md-2 mb-3">
+        <input type="number" name="amount" class="form-control" placeholder="Amount" required>
       </div>
-      <div class="col-md-3">
-        <select class="form-select" name="category" required>
-          <option selected disabled>Choose Category</option>
+      <div class="col-md-3 mb-3">
+        <select name="category" class="form-select" required>
+          <option value="" disabled selected>Category</option>
           <option>Food</option>
-          <option>Transport</option>
-          <option>Entertainment</option>
+          <option>Travel</option>
           <option>Shopping</option>
+          <option>Bills</option>
           <option>Other</option>
         </select>
       </div>
-      <div class="col-md-2">
-        <input type="date" class="form-control" name="date" required>
+      <div class="col-md-2 mb-3">
+        <input type="date" name="date" class="form-control" required>
       </div>
-      <div class="col-md-1">
-        <button class="btn btn-success w-100">Add</button>
+      <div class="col-md-2 mb-3">
+        <button type="submit" class="btn btn-success w-100">Add</button>
       </div>
-    </form>
-  </div>
+    </div>
+  </form>
+</div>
 
-  <!-- Expenses Table -->
-  <div class="table-responsive bg-white p-3 shadow rounded">
-    <h5 class="mb-3">Expense History</h5>
-    <table class="table table-bordered table-striped mb-0">
+<!-- Total & Analytics -->
+<div class="container mt-4 d-flex justify-content-between align-items-center">
+  <h5>Total Expense: ₹{{ total }}</h5>
+  <a href="/analytics" class="btn btn-outline-primary">View Analytics</a>
+</div>
+
+<!-- Expense Table -->
+<div class="container mt-3">
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped mt-3">
       <thead class="table-dark">
         <tr>
           <th>Title</th>
-          <th>Amount (₹)</th>
+          <th>Amount</th>
           <th>Category</th>
           <th>Date</th>
-          <th class="text-center">Actions</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for expense in expenses %}
-        <tr>
-          <td>{{ expense.title }}</td>
-          <td>{{ expense.amount }}</td>
-          <td>{{ expense.category }}</td>
-          <td>{{ expense.date }}</td>
-          <td class="text-center">
-            <a href="/edit/{{ expense.id }}" class="btn btn-sm btn-primary">Edit</a>
-            <a href="/delete/{{ expense.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Delete this expense?')">Delete</a>
-          </td>
-        </tr>
+          <tr>
+            <td>{{ expense.title }}</td>
+            <td>₹{{ expense.amount }}</td>
+            <td>{{ expense.category }}</td>
+            <td>{{ expense.date }}</td>
+            <td>
+              <a href="{{ url_for('edit', id=expense.id) }}" class="btn btn-sm btn-warning">Edit</a>
+              <a href="{{ url_for('delete', id=expense.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure?')">Delete</a>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="5" class="text-center text-muted">No expenses found.</td>
+          </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-
 </div>
 
-<!-- ✅ Chart Script -->
-<script>
-  const ctx = document.getElementById('expenseChart').getContext('2d');
-  const expenseChart = new Chart(ctx, {
-    type: 'pie',
-    data: {
-      labels: { category_labels , tojson , safe },
-      datasets: {
-        data: { category_values , tojson , safe },
-        backgroundColor: ['#007bff', '#28a745', '#ffc107', '#dc3545', '#6f42c1'],
-        borderWidth: 1
-      }
-    },
-    options: {
-      plugins: {
-        legend: {
-          position: 'bottom'
-        }
-      }
-    }
-  });
-</script>
-
-<!-- ✅ Auto-scroll to bottom -->
-<script>
-  window.onload = function () {
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-  };
-</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
 </body>
 </html>
-
-

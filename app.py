@@ -1,169 +1,161 @@
-from flask import Flask, render_template, request, redirect, session, flash
-import sqlite3
-import os
+from flask import Flask, render_template, request, redirect, session, url_for, flash
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///expenses.db'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SECURE'] = False
+app.config['REMEMBER_COOKIE_HTTPONLY'] = True
 
-# Create database if not exists
-def init_db():
-    conn = sqlite3.connect('expense_tracker.db')
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        email TEXT UNIQUE NOT NULL,
-                        password TEXT NOT NULL)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS expenses (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        user_id INTEGER,
-                        title TEXT,
-                        amount REAL,
-                        category TEXT,
-                        date TEXT)''')
-    conn.commit()
-    conn.close()
+# Security Headers
+@app.after_request
+def set_secure_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    return response
 
-init_db()
+db = SQLAlchemy(app)
 
+# Models
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(100), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+
+class Expense(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(100), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    category = db.Column(db.String(50), nullable=False)
+    date = db.Column(db.String(10), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+# Login Required Decorator
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash("Please log in first.", "warning")
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Routes
 @app.route('/')
-def home():
-    return redirect('/login')
+def index():
+    return redirect(url_for('login'))
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        email = request.form['email']
+        username = request.form['username']
         password = request.form['password']
-        conn = sqlite3.connect('expense_tracker.db')
-        cursor = conn.cursor()
-        try:
-            cursor.execute("INSERT INTO users (email, password) VALUES (?, ?)", (email, password))
-            conn.commit()
-            conn.close()
-            flash("Registration successful. Please log in.", "success")
-            return redirect('/login')
-        except:
-            conn.close()
-            flash("User already exists! Try logging in.", "danger")
-            return redirect('/register')
+
+        existing_user = User.query.filter_by(username=username).first()
+        if existing_user:
+            flash('Username already exists.', 'danger')
+            return redirect(url_for('register'))
+
+        hashed_password = generate_password_hash(password)
+        new_user = User(username=username, password=hashed_password)
+        db.session.add(new_user)
+        db.session.commit()
+        flash('Registration successful. Please login.', 'success')
+        return redirect(url_for('login'))
+
     return render_template('register.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        email = request.form['email']
+        username = request.form['username']
         password = request.form['password']
-        conn = sqlite3.connect('expense_tracker.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM users WHERE email = ? AND password = ?", (email, password))
-        user = cursor.fetchone()
-        conn.close()
-        if user:
-            session['user_id'] = user[0]
-            flash("Login successful!", "success")
-            return redirect('/dashboard')
+        user = User.query.filter_by(username=username).first()
+
+        if user and check_password_hash(user.password, password):
+            session['user_id'] = user.id
+            flash('Login successful!', 'success')
+            return redirect(url_for('dashboard'))
         else:
-            flash("Invalid credentials", "danger")
-            return redirect('/login')
+            flash('Invalid credentials.', 'danger')
+            return redirect(url_for('login'))
+
     return render_template('login.html')
 
 @app.route('/logout')
 def logout():
     session.pop('user_id', None)
-    flash("Logged out successfully.", "info")
-    return redirect('/login')
+    flash('Logged out successfully.', 'info')
+    return redirect(url_for('login'))
 
 @app.route('/dashboard', methods=['GET', 'POST'])
+@login_required
 def dashboard():
-    if 'user_id' not in session:
-        return redirect('/login')
-
-    conn = sqlite3.connect('expense_tracker.db')
-    cursor = conn.cursor()
-
+    user_id = session['user_id']
     if request.method == 'POST':
         title = request.form['title']
         amount = float(request.form['amount'])
         category = request.form['category']
         date = request.form['date']
-        cursor.execute("INSERT INTO expenses (user_id, title, amount, category, date) VALUES (?, ?, ?, ?, ?)",
-                       (session['user_id'], title, amount, category, date))
-        conn.commit()
-        flash("Expense added successfully.", "success")
 
-    cursor.execute("SELECT id, title, amount, category, date FROM expenses WHERE user_id = ?", (session['user_id'],))
-    expenses = cursor.fetchall()
+        new_expense = Expense(title=title, amount=amount, category=category, date=date, user_id=user_id)
+        db.session.add(new_expense)
+        db.session.commit()
+        flash('Expense added!', 'success')
+        return redirect(url_for('dashboard'))
 
-    expense_list = []
-    total_expense = 0
-    category_data = {}
-
-    for e in expenses:
-        expense = {
-            'id': e[0],
-            'title': e[1],
-            'amount': e[2],
-            'category': e[3],
-            'date': e[4]
-        }
-        expense_list.append(expense)
-        total_expense += e[2]
-
-        if e[3] in category_data:
-            category_data[e[3]] += e[2]
-        else:
-            category_data[e[3]] = e[2]
-
-    conn.close()
-
-    return render_template(
-        'dashboard.html',
-        expenses=expense_list,
-        total=total_expense,
-        category_labels=list(category_data.keys()),
-        category_values=list(category_data.values())
-    )
-
-@app.route('/delete/<int:id>')
-def delete_expense(id):
-    if 'user_id' not in session:
-        return redirect('/login')
-    conn = sqlite3.connect('expense_tracker.db')
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM expenses WHERE id = ? AND user_id = ?", (id, session['user_id']))
-    conn.commit()
-    conn.close()
-    flash("Expense deleted.", "warning")
-    return redirect('/dashboard')
+    expenses = Expense.query.filter_by(user_id=user_id).all()
+    total = sum(exp.amount for exp in expenses)
+    return render_template('dashboard.html', expenses=expenses, total=total)
 
 @app.route('/edit/<int:id>', methods=['GET', 'POST'])
-def edit_expense(id):
-    if 'user_id' not in session:
-        return redirect('/login')
-    conn = sqlite3.connect('expense_tracker.db')
-    cursor = conn.cursor()
+@login_required
+def edit(id):
+    expense = Expense.query.get_or_404(id)
     if request.method == 'POST':
-        title = request.form['title']
-        amount = float(request.form['amount'])
-        category = request.form['category']
-        date = request.form['date']
-        cursor.execute("""
-            UPDATE expenses SET title = ?, amount = ?, category = ?, date = ?
-            WHERE id = ? AND user_id = ?
-        """, (title, amount, category, date, id, session['user_id']))
-        conn.commit()
-        conn.close()
-        flash("Expense updated successfully.", "success")
-        return redirect('/dashboard')
-    else:
-        cursor.execute("SELECT title, amount, category, date FROM expenses WHERE id = ? AND user_id = ?", (id, session['user_id']))
-        expense = cursor.fetchone()
-        conn.close()
-        if expense:
-            return render_template('edit.html', expense_id=id, title=expense[0], amount=expense[1], category=expense[2], date=expense[3])
-        else:
-            flash("Expense not found.", "danger")
-            return redirect('/dashboard')
+        expense.title = request.form['title']
+        expense.amount = float(request.form['amount'])
+        expense.category = request.form['category']
+        expense.date = request.form['date']
+        db.session.commit()
+        flash('Expense updated.', 'success')
+        return redirect(url_for('dashboard'))
+    return render_template('edit.html', expense=expense)
 
+@app.route('/delete/<int:id>')
+@login_required
+def delete(id):
+    expense = Expense.query.get_or_404(id)
+    db.session.delete(expense)
+    db.session.commit()
+    flash('Expense deleted.', 'info')
+    return redirect(url_for('dashboard'))
+
+@app.route('/analytics')
+@login_required
+def analytics():
+    user_id = session['user_id']
+    expenses = Expense.query.filter_by(user_id=user_id).all()
+
+    category_data = {}
+    for expense in expenses:
+        category_data[expense.category] = category_data.get(expense.category, 0) + expense.amount
+
+    labels = list(category_data.keys())
+    values = list(category_data.values())
+
+    return render_template('analytics.html', category_labels=labels, category_values=values)
+
+# Run App
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
+
+
+
+
